@@ -4,14 +4,18 @@ This repository demonstrates a performance issue in [django-debug-toolbar](https
 
 ## The Problem
 
-When a SQL query contains thousands of parameters in an `IN` clause (e.g., UUIDs), the debug toolbar's SQL panel has problems - either **extremely slow rendering** or **crashes with an error**, depending on the sqlparse version.
+When a SQL query contains thousands of parameters in an `IN` clause (e.g., UUIDs), the debug toolbar has problems with SQL formatting - either **extremely slow** or **crashes with an error**, depending on the versions.
 
-### Behavior by sqlparse Version
+### Behavior Matrix
 
-| sqlparse Version | Behavior | Impact |
-|------------------|----------|--------|
-| < 0.5.5 | SQL panel freezes for 10+ seconds | Development workflow blocked |
-| >= 0.5.5 | `SQLParseError: Maximum number of tokens exceeded (10000)` | SQL panel crashes |
+| debug-toolbar | sqlparse | When | Behavior |
+|---------------|----------|------|----------|
+| <= 5.x | < 0.5.5 | **Page load** | Freezes 10-18+ seconds |
+| <= 5.x | >= 0.5.5 | **Page load** | SQLParseError crash |
+| >= 6.x | < 0.5.5 | SQL panel click | Freezes 10-18+ seconds |
+| >= 6.x | >= 0.5.5 | SQL panel click | SQLParseError crash |
+
+**Key difference**: debug-toolbar 6.x changed to lazy loading - SQL formatting happens when you click the panel, not during page load. This partially mitigates the issue (pages load fast), but the SQL panel still has problems.
 
 ### Example Scenario
 
@@ -21,7 +25,7 @@ job_ids = list(Campaign.objects.filter(...).values_list('job_id', flat=True))
 # job_ids contains 5000+ UUIDs
 
 applications = JobApplication.objects.filter(job_id__in=job_ids)
-# Database query is fast, but debug toolbar has problems rendering
+# Database query is fast, but debug toolbar has problems with formatting
 ```
 
 ### Root Cause
@@ -45,12 +49,17 @@ For a query with 5000 UUIDs:
 
 The LRU cache doesn't help because each query with different parameters is a cache miss.
 
+### Where `reformat_sql()` is called
+
+- **debug-toolbar <= 5.x**: Called in `generate_stats()` during response processing → **blocks page load**
+- **debug-toolbar >= 6.x**: Called in `content` property via AJAX → **blocks only when SQL panel is clicked**
+
 ## Reproduction Steps
 
 ### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/xxx/debug-toolbar-perf-issue.git
+git clone https://github.com/kkm-horikawa/debug-toolbar-perf-issue.git
 cd debug-toolbar-perf-issue
 uv sync
 ```
@@ -69,26 +78,35 @@ uv run python manage.py runserver
 
 ### 4. Test the Issue
 
-Visit http://127.0.0.1:8000/ and click on the test links, then **click on the SQL panel** in debug toolbar:
+Visit http://127.0.0.1:8000/ and click on the test links.
 
-| Link | IN clause size | sqlparse < 0.5.5 | sqlparse >= 0.5.5 |
-|------|----------------|------------------|-------------------|
-| 100 UUIDs | 100 | 0.01s | Fast |
-| 500 UUIDs | 500 | 0.08s | Fast |
-| 1,000 UUIDs | 1,000 | 0.26s | Fast |
-| 3,000 UUIDs | 3,000 | 1.81s | Fast |
-| 5,000 UUIDs | 5,000 | 4.87s | **SQLParseError** |
-| 10,000 UUIDs | 10,000 | **18.02s** | **SQLParseError** |
+**With debug-toolbar 5.x**: The page itself will be slow to load.
+**With debug-toolbar 6.x**: The page loads fast, but clicking the SQL panel is slow/crashes.
 
-### Testing with Different sqlparse Versions
+### Benchmark Results (sqlparse 0.5.3)
+
+| IN clause size | Format time |
+|----------------|-------------|
+| 100 UUIDs | 0.01s |
+| 500 UUIDs | 0.08s |
+| 1,000 UUIDs | 0.26s |
+| 3,000 UUIDs | 1.81s |
+| 5,000 UUIDs | 4.87s |
+| 10,000 UUIDs | **18.02s** |
+
+### Testing with Different Versions
 
 ```bash
-# Test with old sqlparse (slow behavior)
-uv add sqlparse==0.5.3
+# Test page-blocking behavior (older debug-toolbar)
+uv add django-debug-toolbar==5.2.0 sqlparse==0.5.3
 uv run python manage.py runserver
 
-# Test with new sqlparse (crash behavior)
-uv add sqlparse==0.5.5
+# Test lazy-load behavior (newer debug-toolbar)
+uv add django-debug-toolbar==6.1.0 sqlparse==0.5.3
+uv run python manage.py runserver
+
+# Test crash behavior (new sqlparse)
+uv add django-debug-toolbar==6.1.0 sqlparse==0.5.5
 uv run python manage.py runserver
 ```
 
@@ -108,7 +126,7 @@ This disables formatting for ALL queries, not just the problematic ones.
 ### 1. Handle sqlparse exceptions gracefully
 
 ```python
-# debug_toolbar/panels/sql/panel.py - in content property
+# debug_toolbar/panels/sql/panel.py
 from sqlparse.exceptions import SQLParseError
 
 try:
@@ -151,7 +169,7 @@ Benefits:
 
 - Python 3.11+
 - Django 5.0+
-- django-debug-toolbar 4.0+
+- django-debug-toolbar 5.2.0 (page blocks) or 6.1.0 (panel blocks)
 - sqlparse 0.5.3 (slow) or 0.5.5+ (crash)
 
 ## License
