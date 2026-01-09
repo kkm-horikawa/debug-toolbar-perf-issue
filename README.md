@@ -73,11 +73,12 @@ Visit http://127.0.0.1:8000/ and click on the test links, then **click on the SQ
 
 | Link | IN clause size | sqlparse < 0.5.5 | sqlparse >= 0.5.5 |
 |------|----------------|------------------|-------------------|
-| 100 UUIDs | 100 | Fast | Fast |
-| 500 UUIDs | 500 | ~500ms | Fast |
-| 1,000 UUIDs | 1,000 | ~2s | Fast |
-| 3,000 UUIDs | 3,000 | ~5-8s | Fast |
-| 5,000 UUIDs | 5,000 | 10+ seconds | **SQLParseError** |
+| 100 UUIDs | 100 | 0.01s | Fast |
+| 500 UUIDs | 500 | 0.08s | Fast |
+| 1,000 UUIDs | 1,000 | 0.26s | Fast |
+| 3,000 UUIDs | 3,000 | 1.81s | Fast |
+| 5,000 UUIDs | 5,000 | 4.87s | **SQLParseError** |
+| 10,000 UUIDs | 10,000 | **18.02s** | **SQLParseError** |
 
 ### Testing with Different sqlparse Versions
 

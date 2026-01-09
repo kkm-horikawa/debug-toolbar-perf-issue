@@ -23,7 +23,8 @@ def index(request):
             <li><a href="/slow/?count=500">500 UUIDs in IN clause</a> - Getting slower</li>
             <li><a href="/slow/?count=1000">1,000 UUIDs in IN clause</a> - Noticeably slow</li>
             <li><a href="/slow/?count=3000">3,000 UUIDs in IN clause</a> - Very slow</li>
-            <li><a href="/slow/?count=5000">5,000 UUIDs in IN clause</a> - Extremely slow (10+ seconds)</li>
+            <li><a href="/slow/?count=5000">5,000 UUIDs in IN clause</a> - Extremely slow (~5s) or crash</li>
+            <li><a href="/slow/?count=10000">10,000 UUIDs in IN clause</a> - ~18 seconds or crash</li>
         </ul>
 
         <h2>The Problem</h2>
