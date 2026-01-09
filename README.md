@@ -121,43 +121,84 @@ DEBUG_TOOLBAR_CONFIG = {
 
 This disables formatting for ALL queries, not just the problematic ones.
 
-## Proposed Solution
+## Testing the Fix
 
-### 1. Handle sqlparse exceptions gracefully
+A fix has been implemented in a fork. To test it:
 
-```python
-# debug_toolbar/panels/sql/panel.py
-from sqlparse.exceptions import SQLParseError
+### Option 1: Install from Git branch
 
-try:
-    query["sql"] = reformat_sql(query["sql"], with_toggle=True)
-except SQLParseError:
-    # sqlparse token limit exceeded
-    query["sql"] = f'<em>(Query too long to format: {len(query["sql"]):,} chars)</em>'
+```bash
+# Using pip
+pip install git+https://github.com/kkm-horikawa/django-debug-toolbar.git@fix/graceful-degradation-large-sql
+
+# Using uv
+uv add git+https://github.com/kkm-horikawa/django-debug-toolbar.git@fix/graceful-degradation-large-sql
 ```
 
-### 2. Automatic graceful degradation based on SQL length
+### Option 2: Update pyproject.toml
+
+Replace the django-debug-toolbar dependency:
+
+```toml
+[project]
+dependencies = [
+    "django>=6.0.1",
+    "django-debug-toolbar @ git+https://github.com/kkm-horikawa/django-debug-toolbar.git@fix/graceful-degradation-large-sql",
+]
+```
+
+Then run `uv sync` or `pip install -e .`
+
+### Configuring the threshold
+
+The fix adds a new setting `SQL_PRETTIFY_MAX_LENGTH` (default: 50000 characters):
+
+```python
+# settings.py
+DEBUG_TOOLBAR_CONFIG = {
+    'PRETTIFY_SQL': True,  # Keep formatting enabled
+    'SQL_PRETTIFY_MAX_LENGTH': 50000,  # Skip formatting for SQL > 50KB
+}
+```
+
+When a query exceeds the threshold:
+- Formatting is skipped (no freeze or crash)
+- A message is displayed: "SQL formatting skipped (query length X exceeds threshold Y)"
+- A preview of the raw SQL is shown
+
+## Implemented Solution
+
+The fix in the fork implements:
+
+### 1. Length-based threshold check
+
+Before attempting to format SQL, check if it exceeds `SQL_PRETTIFY_MAX_LENGTH` (default 50000):
 
 ```python
 # debug_toolbar/panels/sql/utils.py
-
-SQL_FORMAT_MAX_LENGTH = 50000  # Configurable threshold
-
-@lru_cache(maxsize=128)
-def parse_sql(sql, *, simplify=False):
-    # Skip formatting for extremely long queries
-    if len(sql) > SQL_FORMAT_MAX_LENGTH:
-        truncated = escape(sql[:1000])
-        return f'<em>(Query too long to format: {len(sql):,} characters)</em><br/><pre>{truncated}...</pre>'
-
-    stack = get_filter_stack(simplify=simplify)
-    return "".join(stack.run(sql))
+max_length = dt_settings.get_config()["SQL_PRETTIFY_MAX_LENGTH"]
+if max_length and len(sql) > max_length:
+    return _format_skipped_sql(sql, f"query length exceeds threshold")
 ```
 
-Benefits:
-- Normal queries still get full formatting
-- Long queries display gracefully without freezing or crashing
-- Configurable threshold via `DEBUG_TOOLBAR_CONFIG`
+### 2. Exception handling for sqlparse errors
+
+Catch `SQLParseError` from sqlparse >= 0.5.5 when `MAX_GROUPING_TOKENS` is exceeded:
+
+```python
+try:
+    formatted = parse_sql(sql)
+except SQLParseError as e:
+    return _format_skipped_sql(sql, f"sqlparse error: {e}")
+```
+
+### Benefits
+
+- **Normal queries**: Full formatting preserved
+- **Long queries**: Skip formatting, show preview (no freeze)
+- **sqlparse errors**: Graceful fallback (no crash)
+- **Configurable**: Threshold via `DEBUG_TOOLBAR_CONFIG`
+- **Informative**: Shows reason for skipping + SQL preview
 
 ## Related Issues
 
